@@ -3,33 +3,42 @@
 
 module Main (main) where
 
-import Prelude hiding (null)
-import Lib
-import Web.Scotty
-import qualified Data.Text.Lazy as T
-import Data.Aeson
-import Network.Wai.Middleware.Cors (simpleCors)
-import Network.URI (parseURI)
-import Database.SQLite.Simple
-import Data.Text.Lazy (Text, pack, unpack, null)
-import Control.Concurrent.STM (atomically, newTVar, readTVar, modifyTVar, TVar)
-import Control.Exception (SomeException)
-import qualified Data.ByteString.Lazy.Char8 as B
-import Data.Maybe (fromMaybe)
-import Control.Applicative (optional)
-import qualified Data.Map as Map
+-- | This module (Main.hs) sets up the web server using the Scotty framework.
+-- | It defines the routes for the URL shortener application, handles HTTP requests,
+-- | interacts with the SQLite database, and manages an in-memory URL store.
+-- | It also serves the HTML pages for the user interface.
 
+-- Import necessary modules
+import Prelude hiding (null) -- | Standard Haskell prelude, hiding 'null' to avoid conflicts.
+import Lib -- | Custom module containing core URL shortening logic and database interaction.
+import Web.Scotty -- | Web framework for creating web applications.
+import qualified Data.Text.Lazy as T -- | Lazy Text for efficient text manipulation.
+import Data.Aeson -- | JSON encoding and decoding.
+import Network.Wai.Middleware.Cors (simpleCors) -- | Middleware for handling Cross-Origin Resource Sharing (CORS).
+import Network.URI (parseURI) -- | For parsing and validating URIs.
+import Database.SQLite.Simple -- | SQLite database interaction.
+import Data.Text.Lazy (Text, pack, unpack, null) -- | Lazy Text for efficient text manipulation.
+import Control.Concurrent.STM (atomically, newTVar, readTVar, modifyTVar, TVar) -- | Software Transactional Memory for concurrent operations.
+import Control.Exception (SomeException) -- | Exception handling.
+import qualified Data.ByteString.Lazy.Char8 as B -- | Lazy ByteString for efficient byte string manipulation.
+import Data.Maybe (fromMaybe) -- | Functions for working with Maybe types.
+import Control.Applicative (optional) -- | Applicative functions.
+import qualified Data.Map as Map -- | Maps for in-memory URL storage.
 
 -- Function to validate URLs
+-- Checks if a given string is a valid URL using parseURI
 isValidUrl :: String -> Bool
 isValidUrl url = case parseURI url of
     Just _ -> True
     Nothing -> False
 
 -- Serve the HTML page that displays the shortened URLs and allows the user to shorten a new URL
+-- Fetches URL mappings from the SQLite database and renders an HTML page
 serveHTML :: Connection -> ActionM ()
 serveHTML conn = do
+    -- Fetch all URL mappings from the database
     mappings <- liftIO $ getAllMappings conn
+    -- Construct HTML for the list of previously shortened URLs
     let previousUrls = T.concat
             [ "<p>Shortened URLs:</p>"
             , "<div class='url-list'>"
@@ -40,6 +49,7 @@ serveHTML conn = do
             , "</div>"
             ]
 
+    -- Render the complete HTML page
     html $ T.concat
         [ "<html>"
         , "<head>"
@@ -93,6 +103,7 @@ serveHTML conn = do
         , "</html>"
         ]
 
+
 passwordForm :: String -> String
 passwordForm code =
   "<html>" ++
@@ -134,51 +145,87 @@ passwordForm code =
 -- The main function to set up the server and handle routing
 main :: IO ()
 main = do
+    -- Open the SQLite database connection
     conn <- open "urls.db"
+    -- Create the 'urls' table if it doesn't exist
     createTable conn
+    -- Initialize the in-memory URL store
     storeVar <- atomically $ newTVar Map.empty
+    -- Start the Scotty web server on port 3000
     scotty 3000 $ do
+        -- Enable CORS middleware
         middleware simpleCors
+        -- Route for the main HTML page
         get "/" $ serveHTML conn
+        -- Route for shortening URLs (SQLite database)
         post "/shorten" $ do
+            -- Get the URL from the query parameters
             original <- queryParam "url" :: ActionM String
+            -- Validate the URL
             if isValidUrl original
                 then do
+                    -- Generate a short URL
                     short <- liftIO generateShortURL
+                    -- Insert the URL mapping into the database
                     liftIO $ insertURLMapping conn original short
+                    -- Return the shortened URL as JSON
                     json $ object ["short_url" .= ("http://localhost:3000/" ++ short)]
                 else
+                    -- Return an error message as JSON
                     json $ object ["error" .= ("Invalid URL format." :: String)]
 
-        -- In-memory routes
+        -- Route for shortening URLs (in-memory store)
         post "/shorten/memory" $ do
+            -- Get the URL from the form parameters
             longUrl <- formParam "url"
+            -- Get the password from the form parameters, or an empty string if not provided
             pass <- formParam "password" `catch` (\(_ :: SomeException) -> return "")
+            -- Generate a short code and store the URL entry in the in-memory store
             shortCode <- liftIO $ generateShortCode storeVar (unpack longUrl) (if null pass then Nothing else Just (unpack pass))
+            -- Return the shortened URL as JSON
             json $ object ["short_url" .= ("http://localhost:3000/" ++ shortCode)]
 
+        -- Route for redirecting from a short URL to the original URL
         get "/:short" $ do
+            -- Get the short URL from the path parameters
             short <- pathParam "short" :: ActionM String
+            -- Try to get the original URL from the database
             maybeOriginal <- liftIO $ getOriginalURL conn short
             case maybeOriginal of
+                -- If found in the database, redirect to the original URL
                 Just original -> redirect (T.pack original)
+                -- If not found in the database, try to get it from the in-memory store
                 Nothing -> do
                     maybeOriginalInMemory <- liftIO $ atomically $ readTVar storeVar >>= return . Map.lookup short
                     case maybeOriginalInMemory of
+                        -- If found in the in-memory store
                         Just entry -> case password entry of
+                            -- If no password is required, redirect to the original URL
                             Nothing -> redirect (pack $ originalUrl entry)
+                            -- If a password is required, serve the password form
                             Just _ -> html $ pack $ passwordForm short
+                        -- If not found in the in-memory store, return an error message
                         Nothing -> text "Short URL not found"
 
+        -- Route for verifying the password and redirecting to the original URL
         post "/verify/:short" $ do
+            -- Get the short URL from the path parameters
             short <- pathParam "short"
+            -- Get the password from the form parameters
             inputPass <- formParam "password"
+            -- Get the in-memory store
             store <- liftIO $ atomically $ readTVar storeVar
             case Map.lookup short store of
+                -- If the short URL is not found, return an error message
                 Nothing -> html "Link not found!"
+                -- If the short URL is found
                 Just entry -> case password entry of
+                    -- If no password is required, redirect to the original URL
                     Nothing -> redirect (pack $ originalUrl entry)
+                    -- If a password is required
                     Just storedPass ->
+                        -- If the input password matches the stored password, redirect to the original URL
                         if inputPass == storedPass
                             then redirect (pack $ originalUrl entry)
+                            -- If the input password is incorrect, return an error message
                             else html "Incorrect password!"
