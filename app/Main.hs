@@ -26,7 +26,7 @@ serveHTML conn = do
     -- Construct HTML content with the mappings
     let previousUrls = T.concat [ "<p>Shortened URLs:</p>"
                                  , "<div class='url-list'>"
-                                 , T.concat [ "<div class='url-item'><a href=\"http://localhost:3000/" <> T.pack short <> "\" class='short-url'>" <> T.pack short <> "</a> <span class='arrow'>→</span> <span class='original-url'>" <> T.pack original <> "</span></div>"
+                                 , T.concat [ "<div class='url-item'><a href=\"http://localhost:3000/" <> T.pack short <> "\" class='short-url' target='_blank'>" <> T.pack short <> "</a> <span class='arrow'>→</span> <span class='original-url'>" <> T.pack original <> "</span></div>"
                                               | URLMapping original short <- mappings ]
                                  , "</div>" ]
 
