@@ -3,13 +3,14 @@
 module Main (main) where
 
 -- Importing necessary libraries and modules
-import Lib
-import Web.Scotty
-import Database.SQLite.Simple
-import qualified Data.Text.Lazy as T
-import Data.Aeson
-import Network.Wai.Middleware.Cors (simpleCors)
-import Network.URI (parseURI)
+import Lib -- This module contains the core logic for URL shortening and database interactions.
+import Web.Scotty -- A lightweight Haskell web framework used to handle HTTP requests and serve responses.
+import Database.SQLite.Simple -- A simple interface for interacting with SQLite databases in Haskell.
+import qualified Data.Text.Lazy as T -- Used for efficient handling of lazy Text data, which is used for rendering HTML responses.
+import Data.Aeson -- A library for encoding and decoding JSON in Haskell.
+import Network.Wai.Middleware.Cors (simpleCors) -- Middleware for handling CORS (Cross-Origin Resource Sharing), useful for allowing requests from different domains.
+import Network.URI (parseURI) -- A module that provides functions for parsing URIs (Uniform Resource Identifiers), used for validating URLs.
+
 
 -- Function to validate URLs
 isValidUrl :: String -> Bool
