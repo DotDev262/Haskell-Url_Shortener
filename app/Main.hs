@@ -8,6 +8,13 @@ import Database.SQLite.Simple
 import qualified Data.Text.Lazy as T
 import Data.Aeson
 import Network.Wai.Middleware.Cors (simpleCors)
+import Network.URI (parseURI)
+
+-- Function to validate URLs
+isValidUrl :: String -> Bool
+isValidUrl url = case parseURI url of
+    Just _  -> True
+    Nothing -> False
 
 serveHTML :: Connection -> ActionM ()
 serveHTML conn = do
@@ -215,11 +222,16 @@ main = do
 
         post "/shorten" $ do
             original <- queryParam "url" :: ActionM String
-            short <- liftIO generateShortURL
+            
+            -- Validate the URL on the server side
+            if isValidUrl original
+                then do
+                    short <- liftIO generateShortURL
+                    liftIO $ insertURLMapping conn original short
+                    json $ object ["short_url" .= ("http://localhost:3000/" ++ short)]
+                else 
+                    json $ object ["error" .= ("Invalid URL format." :: String)]
 
-            liftIO $ insertURLMapping conn original short
-
-            json $ object ["short_url" .= ("http://localhost:3000/" ++ short)]
 
         get "/:short" $ do
             short <- pathParam "short" :: ActionM String

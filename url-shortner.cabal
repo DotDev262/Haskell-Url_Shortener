@@ -40,6 +40,7 @@ library
     , bytestring
     , cryptonite
     , http-types
+    , network-uri
     , random
     , scotty
     , sqlite-simple
@@ -64,6 +65,7 @@ executable url-shortner-exe
     , bytestring
     , cryptonite
     , http-types
+    , network-uri
     , random
     , scotty
     , sqlite-simple
@@ -90,6 +92,7 @@ test-suite url-shortner-test
     , bytestring
     , cryptonite
     , http-types
+    , network-uri
     , random
     , scotty
     , sqlite-simple
