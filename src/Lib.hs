@@ -10,8 +10,7 @@ module Lib
     , getOriginalURL
     , UrlEntry(..)
     , UrlStore
-    , storeShortURL
-    , retrieveOriginalURL
+    , generateShortCode
     ) where
 
 import Crypto.Random (getRandomBytes)
@@ -19,8 +18,11 @@ import Data.Aeson (FromJSON, ToJSON)
 import qualified Data.ByteString as BS
 import Database.SQLite.Simple
 import GHC.Generics (Generic)
-import qualified Data.Map as Map
 import Control.Concurrent.STM (TVar, atomically, readTVar, modifyTVar)
+import Data.Map (Map)
+import qualified Data.Map as Map
+
+
 
 -- SQLite Functionality
 data URLMapping = URLMapping String String
@@ -58,17 +60,16 @@ getOriginalURL conn short = do
 
 -- In-Memory Functionality
 data UrlEntry = UrlEntry
-    { originalUrl :: String
-    , shortUrl :: String
-    } deriving (Show)
+  { originalUrl :: String
+  , password :: Maybe String
+  } deriving (Show)
 
-type UrlStore = Map.Map String UrlEntry
+type UrlStore = Map String UrlEntry
 
-storeShortURL :: TVar UrlStore -> String -> String -> IO ()
-storeShortURL storeVar original short = atomically $ do
-    modifyTVar storeVar (Map.insert short (UrlEntry original short))
-
-retrieveOriginalURL :: TVar UrlStore -> String -> IO (Maybe String)
-retrieveOriginalURL storeVar short = atomically $ do
-    store <- readTVar storeVar
-    return $ originalUrl <$> Map.lookup short store
+generateShortCode :: TVar UrlStore -> String -> Maybe String -> IO String
+generateShortCode storeVar longUrl pass = atomically $ do
+  store <- readTVar storeVar
+  let shortCode = "xyz" ++ show (Map.size store + 1)
+  let entry = UrlEntry longUrl pass
+  modifyTVar storeVar (Map.insert shortCode entry)
+  return shortCode

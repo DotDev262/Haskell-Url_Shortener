@@ -1,7 +1,9 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Main (main) where
 
+import Prelude hiding (null)
 import Lib
 import Web.Scotty
 import qualified Data.Text.Lazy as T
@@ -9,13 +11,14 @@ import Data.Aeson
 import Network.Wai.Middleware.Cors (simpleCors)
 import Network.URI (parseURI)
 import Database.SQLite.Simple
-import Data.Text.Lazy (pack)
+import Data.Text.Lazy (Text, pack, unpack, null)
 import Control.Concurrent.STM (atomically, newTVar, readTVar, modifyTVar, TVar)
-import qualified Data.Map as Map
 import Control.Exception (SomeException)
 import qualified Data.ByteString.Lazy.Char8 as B
 import Data.Maybe (fromMaybe)
 import Control.Applicative (optional)
+import qualified Data.Map as Map
+
 
 -- Function to validate URLs
 isValidUrl :: String -> Bool
@@ -90,18 +93,43 @@ serveHTML conn = do
         , "</html>"
         ]
 
--- Function to handle shortening with optional password
-shortenApiHandler :: TVar (Map.Map String String) -> ActionM ()
-shortenApiHandler storeVar = do
-    original <- queryParam "url" :: ActionM String
-    password <- optional (param "password") :: ActionM (Maybe String)
-    if isValidUrl original
-        then do
-            short <- liftIO generateShortURL
-            liftIO $ atomically $ modifyTVar storeVar (Map.insert short original)
-            json $ object ["short_url" .= ("http://localhost:3000/" ++ short)]
-        else
-            json $ object ["error" .= ("Invalid URL format." :: String)]
+passwordForm :: String -> String
+passwordForm code =
+  "<html>" ++
+  "<head>" ++
+  "<title>Enter Password</title>" ++
+  "<style>" ++
+  "* { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }" ++
+  "body { min-height: 100vh; background: linear-gradient(135deg, #f0f4ff 0%, #e6eeff 100%); display: flex; justify-content: center; align-items: center; padding: 20px; }" ++
+  ".container { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); width: 100%; max-width: 600px; }" ++
+  "h1 { color: #2d3748; text-align: center; margin-bottom: 1.5rem; font-size: 2rem; }" ++
+  ".input-section { display: flex; gap: 1rem; margin-bottom: 1.5rem; }" ++
+  ".url-list { margin-top: 1rem; border-top: 2px solid #e2e8f0; padding-top: 1rem; }" ++
+  ".url-item { padding: 0.5rem 0; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; }" ++
+  ".short-url { color: #4299e1; text-decoration: none; font-weight: bold; }" ++
+  ".short-url:hover { text-decoration: underline; }" ++
+  ".original-url { color: #4a5568; }" ++
+  ".arrow { margin: 0 10px; font-weight:bold; }" ++
+  "input { flex: 1; padding:.75rem ; border: 2px solid #e2e8f0; border-radius: 8px; font-size:1rem; transition:.3s; }" ++
+  "input:focus { outline:none; border-color:#4299e1; box-shadow:0 0 0 3px rgba(66,153,225,0.15); }" ++
+  "button { padding:.75rem 1.5rem; background-color:#4299e1; color:white; border-radius:8px; border:none; cursor:pointer; font-size:1rem; transition:.3s; }" ++
+  "button:hover { background-color:#3182ce; }" ++
+  "#result { background-color:#f7fafc; border-radius:8px; padding:.75rem; margin-top:.5rem; }" ++
+  "@media (max-width:480px) { .input-section { flex-direction: column; } button { width:100%; margin-top:.5rem; } }" ++
+  "</style>" ++
+  "</head>" ++
+  "<body>" ++
+  "<div class='container'>" ++
+  "<h1>Enter Password</h1>" ++
+  "<form method='post' action='/verify/" ++ code ++ "'>" ++
+  "<div class='input-section'>" ++
+  "<input type='password' name='password' placeholder='Enter password' aria-label='Password input'/>" ++
+  "<button type='submit'>Submit</button>" ++
+  "</div>" ++
+  "</form>" ++
+  "</div>" ++
+  "</body>" ++
+  "</html>"
 
 -- The main function to set up the server and handle routing
 main :: IO ()
@@ -121,7 +149,13 @@ main = do
                     json $ object ["short_url" .= ("http://localhost:3000/" ++ short)]
                 else
                     json $ object ["error" .= ("Invalid URL format." :: String)]
-        post "/shorten-api" $ shortenApiHandler storeVar
+
+        -- In-memory routes
+        post "/shorten/memory" $ do
+            longUrl <- formParam "url"
+            pass <- formParam "password" `catch` (\(_ :: SomeException) -> return "")
+            shortCode <- liftIO $ generateShortCode storeVar (unpack longUrl) (if null pass then Nothing else Just (unpack pass))
+            json $ object ["short_url" .= ("http://localhost:3000/" ++ shortCode)]
 
         get "/:short" $ do
             short <- pathParam "short" :: ActionM String
@@ -131,5 +165,20 @@ main = do
                 Nothing -> do
                     maybeOriginalInMemory <- liftIO $ atomically $ readTVar storeVar >>= return . Map.lookup short
                     case maybeOriginalInMemory of
-                        Just original -> redirect (T.pack original)
+                        Just entry -> case password entry of
+                            Nothing -> redirect (pack $ originalUrl entry)
+                            Just _ -> html $ pack $ passwordForm short
                         Nothing -> text "Short URL not found"
+
+        post "/verify/:short" $ do
+            short <- pathParam "short"
+            inputPass <- formParam "password"
+            store <- liftIO $ atomically $ readTVar storeVar
+            case Map.lookup short store of
+                Nothing -> html "Link not found!"
+                Just entry -> case password entry of
+                    Nothing -> redirect (pack $ originalUrl entry)
+                    Just storedPass ->
+                        if inputPass == storedPass
+                            then redirect (pack $ originalUrl entry)
+                            else html "Incorrect password!"
