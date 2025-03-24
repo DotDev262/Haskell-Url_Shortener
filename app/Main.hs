@@ -13,6 +13,9 @@ import Data.Text.Lazy (pack)
 import Control.Concurrent.STM (atomically, newTVar, readTVar, modifyTVar, TVar)
 import qualified Data.Map as Map
 import Control.Exception (SomeException)
+import qualified Data.ByteString.Lazy.Char8 as B
+import Data.Maybe (fromMaybe)
+import Control.Applicative (optional)
 
 -- Function to validate URLs
 isValidUrl :: String -> Bool
@@ -87,6 +90,19 @@ serveHTML conn = do
         , "</html>"
         ]
 
+-- Function to handle shortening with optional password
+shortenApiHandler :: TVar (Map.Map String String) -> ActionM ()
+shortenApiHandler storeVar = do
+    original <- queryParam "url" :: ActionM String
+    password <- optional (param "password") :: ActionM (Maybe String)
+    if isValidUrl original
+        then do
+            short <- liftIO generateShortURL
+            liftIO $ atomically $ modifyTVar storeVar (Map.insert short original)
+            json $ object ["short_url" .= ("http://localhost:3000/" ++ short)]
+        else
+            json $ object ["error" .= ("Invalid URL format." :: String)]
+
 -- The main function to set up the server and handle routing
 main :: IO ()
 main = do
@@ -105,15 +121,7 @@ main = do
                     json $ object ["short_url" .= ("http://localhost:3000/" ++ short)]
                 else
                     json $ object ["error" .= ("Invalid URL format." :: String)]
-        post "/shorten-api" $ do
-            original <- queryParam "url" :: ActionM String
-            if isValidUrl original
-                then do
-                    short <- liftIO generateShortURL
-                    liftIO $ storeShortURL storeVar original short
-                    json $ object ["short_url" .= ("http://localhost:3000/" ++ short)]
-                else
-                    json $ object ["error" .= ("Invalid URL format." :: String)]
+        post "/shorten-api" $ shortenApiHandler storeVar
 
         get "/:short" $ do
             short <- pathParam "short" :: ActionM String
@@ -121,7 +129,7 @@ main = do
             case maybeOriginal of
                 Just original -> redirect (T.pack original)
                 Nothing -> do
-                    maybeOriginalInMemory <- liftIO $ retrieveOriginalURL storeVar short
+                    maybeOriginalInMemory <- liftIO $ atomically $ readTVar storeVar >>= return . Map.lookup short
                     case maybeOriginalInMemory of
                         Just original -> redirect (T.pack original)
                         Nothing -> text "Short URL not found"
