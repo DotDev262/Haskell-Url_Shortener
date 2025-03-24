@@ -2,6 +2,7 @@
 
 module Main (main) where
 
+-- Importing necessary libraries and modules
 import Lib
 import Web.Scotty
 import Database.SQLite.Simple
@@ -13,18 +14,22 @@ import Network.URI (parseURI)
 -- Function to validate URLs
 isValidUrl :: String -> Bool
 isValidUrl url = case parseURI url of
-    Just _  -> True
-    Nothing -> False
+    Just _  -> True   -- If the URL can be parsed, it is valid
+    Nothing -> False  -- If parsing fails, the URL is invalid
 
+-- Serve the HTML page that displays the shortened URLs and allows the user to shorten a new URL
 serveHTML :: Connection -> ActionM ()
 serveHTML conn = do
-    mappings <- liftIO $ getAllMappings conn -- Fetch all mappings from the database
+    -- Fetch all URL mappings from the database
+    mappings <- liftIO $ getAllMappings conn 
+    -- Construct HTML content with the mappings
     let previousUrls = T.concat [ "<p>Shortened URLs:</p>"
                                  , "<div class='url-list'>"
                                  , T.concat [ "<div class='url-item'><a href=\"http://localhost:3000/" <> T.pack short <> "\" class='short-url'>" <> T.pack short <> "</a> <span class='arrow'>→</span> <span class='original-url'>" <> T.pack original <> "</span></div>"
                                               | URLMapping original short <- mappings ]
                                  , "</div>" ]
 
+    -- Generate and send the full HTML page as a response
     html $ T.concat
         [ "<html>"
         , "<head>"
@@ -74,7 +79,7 @@ serveHTML conn = do
         , "   justify-content: space-between;"
         , "   align-items: center;"
         , "   border-bottom: 1px solid #e2e8f0;"
-        ," }"
+        , "}"
          -- Short URL link styles
          ," .short-url {"
          ,"   color: #4299e1;" 
@@ -208,35 +213,48 @@ serveHTML conn = do
             ,"</html>"
             ]
 
-
-
-
+-- The main function to set up the server and handle routing
 main :: IO ()
 main = do
+    -- Open the SQLite database
     conn <- open "urls.db"
+    -- Create necessary tables if they don't exist
     createTable conn
 
+    -- Set up the Scotty web server
     scotty 3000 $ do
-        middleware simpleCors -- Enable CORS for local development
+        -- Enable CORS for local development
+        middleware simpleCors 
+
+        -- Route to serve the HTML page when visiting the root
         get "/" $ serveHTML conn -- Pass the connection explicitly here
 
+        -- Route to handle URL shortening when POST request is made
         post "/shorten" $ do
+            -- Get the original URL from the request
             original <- queryParam "url" :: ActionM String
             
             -- Validate the URL on the server side
             if isValidUrl original
                 then do
+                    -- Generate a short URL
                     short <- liftIO generateShortURL
+                    -- Store the original and short URL mapping in the database
                     liftIO $ insertURLMapping conn original short
+                    -- Send the short URL back as a JSON response
                     json $ object ["short_url" .= ("http://localhost:3000/" ++ short)]
                 else 
+                    -- Send an error response if the URL is invalid
                     json $ object ["error" .= ("Invalid URL format." :: String)]
 
-
+        -- Route to handle redirecting from a short URL to the original URL
         get "/:short" $ do
+            -- Get the short URL from the path parameter
             short <- pathParam "short" :: ActionM String
+            -- Look up the original URL corresponding to the short URL
             maybeOriginal <- liftIO $ getOriginalURL conn short
 
+            -- If the original URL is found, redirect to it
             case maybeOriginal of
                 Just original -> redirect (T.pack original)
-                Nothing -> text "Short URL not found"
+                Nothing -> text "Short URL not found"  -- If not found, return an error message
