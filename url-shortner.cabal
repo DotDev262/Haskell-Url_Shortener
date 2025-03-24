@@ -38,12 +38,14 @@ library
     , base >=4.7 && <5
     , base64-bytestring
     , bytestring
+    , containers
     , cryptonite
     , http-types
     , network-uri
     , random
     , scotty
     , sqlite-simple
+    , stm
     , text
     , time
     , wai-cors
@@ -63,12 +65,14 @@ executable url-shortner-exe
     , base >=4.7 && <5
     , base64-bytestring
     , bytestring
+    , containers
     , cryptonite
     , http-types
     , network-uri
     , random
     , scotty
     , sqlite-simple
+    , stm
     , text
     , time
     , url-shortner
@@ -90,12 +94,14 @@ test-suite url-shortner-test
     , base >=4.7 && <5
     , base64-bytestring
     , bytestring
+    , containers
     , cryptonite
     , http-types
     , network-uri
     , random
     , scotty
     , sqlite-simple
+    , stm
     , text
     , time
     , url-shortner

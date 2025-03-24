@@ -33,6 +33,8 @@ dependencies:
 - http-types
 - wai-cors
 - network-uri
+- stm
+- containers
 
 ghc-options:
 - -Wall

@@ -2,260 +2,126 @@
 
 module Main (main) where
 
--- Importing necessary libraries and modules
-import Lib -- This module contains the core logic for URL shortening and database interactions.
-import Web.Scotty -- A lightweight Haskell web framework used to handle HTTP requests and serve responses.
-import Database.SQLite.Simple -- A simple interface for interacting with SQLite databases in Haskell.
-import qualified Data.Text.Lazy as T -- Used for efficient handling of lazy Text data, which is used for rendering HTML responses.
-import Data.Aeson -- A library for encoding and decoding JSON in Haskell.
-import Network.Wai.Middleware.Cors (simpleCors) -- Middleware for handling CORS (Cross-Origin Resource Sharing), useful for allowing requests from different domains.
-import Network.URI (parseURI) -- A module that provides functions for parsing URIs (Uniform Resource Identifiers), used for validating URLs.
-
+import Lib
+import Web.Scotty
+import qualified Data.Text.Lazy as T
+import Data.Aeson
+import Network.Wai.Middleware.Cors (simpleCors)
+import Network.URI (parseURI)
+import Database.SQLite.Simple
+import Data.Text.Lazy (pack)
+import Control.Concurrent.STM (atomically, newTVar, readTVar, modifyTVar, TVar)
+import qualified Data.Map as Map
+import Control.Exception (SomeException)
 
 -- Function to validate URLs
 isValidUrl :: String -> Bool
 isValidUrl url = case parseURI url of
-    Just _  -> True   -- If the URL can be parsed, it is valid
-    Nothing -> False  -- If parsing fails, the URL is invalid
+    Just _ -> True
+    Nothing -> False
 
 -- Serve the HTML page that displays the shortened URLs and allows the user to shorten a new URL
 serveHTML :: Connection -> ActionM ()
 serveHTML conn = do
-    -- Fetch all URL mappings from the database
-    mappings <- liftIO $ getAllMappings conn 
-    -- Construct HTML content with the mappings
-    let previousUrls = T.concat [ "<p>Shortened URLs:</p>"
-                                 , "<div class='url-list'>"
-                                 , T.concat [ "<div class='url-item'><a href=\"http://localhost:3000/" <> T.pack short <> "\" class='short-url' target='_blank'>" <> T.pack short <> "</a> <span class='arrow'>→</span> <span class='original-url'>" <> T.pack original <> "</span></div>"
-                                              | URLMapping original short <- mappings ]
-                                 , "</div>" ]
+    mappings <- liftIO $ getAllMappings conn
+    let previousUrls = T.concat
+            [ "<p>Shortened URLs:</p>"
+            , "<div class='url-list'>"
+            , T.concat
+                [ "<div class='url-item'><a href=\"http://localhost:3000/" <> T.pack short <> "\" class='short-url' target='_blank'>" <> T.pack short <> "</a> <span class='arrow'>→</span> <span class='original-url'>" <> T.pack original <> "</span></div>"
+                | URLMapping original short <- mappings
+                ]
+            , "</div>"
+            ]
 
-    -- Generate and send the full HTML page as a response
     html $ T.concat
         [ "<html>"
         , "<head>"
         , "<title>URL Shortener</title>"
         , "<style>"
-        , "* {"
-        , "    margin: 0;"
-        , "    padding: 0;"
-        , "    box-sizing: border-box;"
-        , "    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;"
+        , "* { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }"
+        , "body { min-height: 100vh; background: linear-gradient(135deg, #f0f4ff 0%, #e6eeff 100%); display: flex; justify-content: center; align-items: center; padding: 20px; }"
+        , ".container { background: white; padding: 2rem; border-radius: 12px; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1); width: 100%; max-width: 600px; }"
+        , "h1 { color: #2d3748; text-align: center; margin-bottom: 1.5rem; font-size: 2rem; }"
+        , ".input-section { display: flex; gap: 1rem; margin-bottom: 1.5rem; }"
+        , ".url-list { margin-top: 1rem; border-top: 2px solid #e2e8f0; padding-top: 1rem; }"
+        , ".url-item { padding: 0.5rem 0; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #e2e8f0; }"
+        , ".short-url { color: #4299e1; text-decoration: none; font-weight: bold; }"
+        , ".short-url:hover { text-decoration: underline; }"
+        , ".original-url { color: #4a5568; }"
+        , ".arrow { margin: 0 10px; font-weight:bold; }"
+        , "input { flex: 1; padding:.75rem ; border: 2px solid #e2e8f0; border-radius: 8px; font-size:1rem; transition:.3s; }"
+        , "input:focus { outline:none; border-color:#4299e1; box-shadow:0 0 0 3px rgba(66,153,225,0.15); }"
+        , "button { padding:.75rem 1.5rem; background-color:#4299e1; color:white; border-radius:8px; border:none; cursor:pointer; font-size:1rem; transition:.3s; }"
+        , "button:hover { background-color:#3182ce; }"
+        , "#result { background-color:#f7fafc; border-radius:8px; padding:.75rem; margin-top:.5rem; }"
+        , "@media (max-width:480px) { .input-section { flex-direction: column; } button { width:100%; margin-top:.5rem; } }"
+        , "</style>"
+        , "</head>"
+        , "<body>"
+        , "<div class='container'>"
+        , "<h1>URL Shortener</h1>"
+        , "<div class='input-section'>"
+        , "<input type='text' id='urlInput' placeholder='Enter your URL here' aria-label='URL input'/>"
+        , "<button onclick='shortenUrl()'>Shorten URL</button>"
+        , "</div>"
+        , "<div id='result' class='output-box'>"
+        , previousUrls
+        , "</div>"
+        , "<script>"
+        , "function shortenUrl() {"
+        , "const urlInput = document.getElementById(\"urlInput\").value.trim();"
+        , "const resultElement = document.getElementById(\"result\");"
+        , "function isValidUrl(string) { try { new URL(string); return true; } catch (_) { return false; } }"
+        , "if (!urlInput) { alert(\"Please enter a URL!\"); return; }"
+        , "if (!isValidUrl(urlInput)) { alert(\"Please enter a valid URL! (e.g., https://example.com)\"); return; }"
+        , "resultElement.textContent = \"Shortening URL...\";"
+        , "fetch(\"/shorten?url=\" + encodeURIComponent(urlInput), { method:\"POST\" }) "
+        , ".then(response => { if (!response.ok) { throw new Error(\"Server error\"); } return response.json(); })"
+        , ".then(data => { resultElement.innerHTML = \"Shortened URL:<br><a href='\" + data.short_url + \"' target='_blank'>>\" + data.short_url + \"</a>\"; })"
+        , ".catch(error => { console.error(\"Error:\", error); resultElement.textContent = \"Error: Failed to shorten URL\"; });"
         , "}"
-        , "body {"
-        , "    min-height: 100vh;"
-        , "    background: linear-gradient(135deg, #f0f4ff 0%, #e6eeff 100%);"
-        , "    display: flex;"
-        , "    justify-content: center;"
-        , "    align-items: center;"
-        , "    padding: 20px;"
-        , "}"
-        , ".container {"
-        , "    background: white;"
-        , "    padding: 2rem;"
-        , "    border-radius: 12px;"
-        , "    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);"
-        , "    width: 100%;"
-        , "    max-width: 600px;"
-        , "}"
-        , "h1 {"
-        , "    color: #2d3748;"
-        , "    text-align: center;"
-        , "    margin-bottom: 1.5rem;"
-        , "    font-size: 2rem;"
-        , "}"
-        , ".input-section {"
-        , "    display: flex;"
-        , "    gap: 1rem;"
-        , "    margin-bottom: 1.5rem;"
-        , "}"
-        , ".url-list {"
-        , "   margin-top: 1rem;"
-        , "   border-top: 2px solid #e2e8f0;"
-        , "   padding-top: 1rem;"
-        , "}"
-        , ".url-item {"
-        , "   padding: 0.5rem 0;"
-        , "   display: flex;"
-        , "   justify-content: space-between;"
-        , "   align-items: center;"
-        , "   border-bottom: 1px solid #e2e8f0;"
-        , "}"
-         -- Short URL link styles
-         ," .short-url {"
-         ,"   color: #4299e1;" 
-         ,"   text-decoration: none;" 
-         ,"   font-weight: bold;" 
-         ," }" 
-         -- Short URL hover effect
-         ," .short-url:hover {"
-         ,"   text-decoration: underline;" 
-         ," }" 
-         -- Original URL styles
-         ," .original-url {"
-         ,"   color: #4a5568;" 
-         ," }" 
-         -- Arrow styles
-         ," .arrow {"
-         ,"   margin: 0 10px;" 
-         ,"   font-weight:bold;" 
-         ," }" 
-         -- Input and button styles (same as before)
-         ,"input {"
-         ,"   flex: 1;" 
-         ,"   padding:.75rem ;"  
-         ,"   border: 2px solid #e2e8f0;" 
-         ,"   border-radius: 8px;"  
-         ,"   font-size:1rem;"  
-         ,"   transition:.3s;"  
-         ," }"  
-          -- Input focus styles
-          ,"input:focus {"
-          ,"   outline:none;"  
-          ,"   border-color:#4299e1;"  
-          ,"   box-shadow:0 0 0 3px rgba(66,153,225,0.15);"  
-          ," }"  
-          -- Button styles
-          ,"button {"
-          ,"   padding:.75rem 1.5rem;"  
-          ,"   background-color:#4299e1;"  
-          ,"   color:white;"  
-          ,"   border-radius:8px;"  
-          ,"   border:none;"  
-          ,"   cursor:pointer;"  
-          ,"   font-size:1rem;"  
-          ,"   transition:.3s;"  
-          ," }"  
-          -- Button hover effect
-          ,"button:hover {"
-          ,"   background-color:#3182ce;"  
-          ," }"  
-          -- Output box styles
-          ,"#result {"
-          ,"   background-color:#f7fafc;"  
-          ,"   border-radius:8px;"  
-          ,"   padding:.75rem;"  
-          ,"   margin-top:.5rem;"  
-          ," }"  
-           -- Media query for responsive design
-           ,"@media (max-width:480px) {"
-           ,"   .input-section {"
-           ,"       flex-direction: column;"  
-           ,"   }"  
-           ,"   button {"
-           ,"       width:100%;"  
-           ,"       margin-top:.5rem;"   
-           ,"   }"  
-           ," }"  
-           -- Closing style tag
-           ,"</style>"
-           -- Closing head tag
-           ,"</head>"
-           -- Body content starts here
-           ,"<body>"
-           -- Container div for better layout
-           ,"<div class='container'>"
-           ,"<h1>URL Shortener</h1>"
-           -- Input section for URL entry
-           ,"<div class='input-section'>"
-           ,"<input type='text' id='urlInput' placeholder='Enter your URL here' aria-label='URL input'/>"
-           ,"<button onclick='shortenUrl()'>Shorten URL</button>"
-           ,"</div>"
-           -- Result output section
-           ,"<div id='result' class='output-box'>"
-           , previousUrls
-           ,"</div>"
-           -- JavaScript for URL shortening functionality
-           ,"<script>"
-           ,"function shortenUrl() {"
-           ,"const urlInput = document.getElementById(\"urlInput\").value.trim();"
-           ,"const resultElement = document.getElementById(\"result\");"
-
-           ,"function isValidUrl(string) {"
-           ,"    try {"
-           ,"       new URL(string);"
-           ,"       return true;"
-           ,"    } catch (_) {"
-           ,"       return false;"
-           ,"    }"
-           ,"}"
-
-           ,"if (!urlInput) {"
-           ,"    alert(\"Please enter a URL!\");"
-           ,"    return;"
-           ,"}"
-
-           ,"if (!isValidUrl(urlInput)) {"
-           ,"    alert(\"Please enter a valid URL! (e.g., https://example.com)\");"
-           ,"    return;"
-           ,"}"
-
-           ,"resultElement.textContent = \"Shortening URL...\";"
-
-            ,"fetch(\"/shorten?url=\" + encodeURIComponent(urlInput), { method:\"POST\" }) "
-            ,".then(response => {"
-            ,"      if (!response.ok) {"
-            ,"          throw new Error(\"Server error\");"
-            ,"      }"
-            ,"      return response.json();"
-            ,"})"
-            ,".then(data => {"
-            ,"      resultElement.innerHTML = \"Shortened URL:<br><a href='\" + data.short_url + \"'>\" + data.short_url + \"</a>\";"
-            ,"})"
-            ,".catch(error => {"
-            ,"      console.error(\"Error:\", error);"
-            ,"      resultElement.textContent = \"Error: Failed to shorten URL\";"
-            ,"});"
-
-            ,"}"
-            ,"</script>"
-            ,"</div>"
-            ,"</body>"
-            ,"</html>"
-            ]
+        , "</script>"
+        , "</div>"
+        , "</body>"
+        , "</html>"
+        ]
 
 -- The main function to set up the server and handle routing
 main :: IO ()
 main = do
-    -- Open the SQLite database
     conn <- open "urls.db"
-    -- Create necessary tables if they don't exist
     createTable conn
-
-    -- Set up the Scotty web server
+    storeVar <- atomically $ newTVar Map.empty
     scotty 3000 $ do
-        -- Enable CORS for local development
-        middleware simpleCors 
-
-        -- Route to serve the HTML page when visiting the root
-        get "/" $ serveHTML conn -- Pass the connection explicitly here
-
-        -- Route to handle URL shortening when POST request is made
+        middleware simpleCors
+        get "/" $ serveHTML conn
         post "/shorten" $ do
-            -- Get the original URL from the request
             original <- queryParam "url" :: ActionM String
-            
-            -- Validate the URL on the server side
             if isValidUrl original
                 then do
-                    -- Generate a short URL
                     short <- liftIO generateShortURL
-                    -- Store the original and short URL mapping in the database
                     liftIO $ insertURLMapping conn original short
-                    -- Send the short URL back as a JSON response
                     json $ object ["short_url" .= ("http://localhost:3000/" ++ short)]
-                else 
-                    -- Send an error response if the URL is invalid
+                else
+                    json $ object ["error" .= ("Invalid URL format." :: String)]
+        post "/shorten-api" $ do
+            original <- queryParam "url" :: ActionM String
+            if isValidUrl original
+                then do
+                    short <- liftIO generateShortURL
+                    liftIO $ storeShortURL storeVar original short
+                    json $ object ["short_url" .= ("http://localhost:3000/" ++ short)]
+                else
                     json $ object ["error" .= ("Invalid URL format." :: String)]
 
-        -- Route to handle redirecting from a short URL to the original URL
         get "/:short" $ do
-            -- Get the short URL from the path parameter
             short <- pathParam "short" :: ActionM String
-            -- Look up the original URL corresponding to the short URL
             maybeOriginal <- liftIO $ getOriginalURL conn short
-
-            -- If the original URL is found, redirect to it
             case maybeOriginal of
                 Just original -> redirect (T.pack original)
-                Nothing -> text "Short URL not found"  -- If not found, return an error message
+                Nothing -> do
+                    maybeOriginalInMemory <- liftIO $ retrieveOriginalURL storeVar short
+                    case maybeOriginalInMemory of
+                        Just original -> redirect (T.pack original)
+                        Nothing -> text "Short URL not found"
