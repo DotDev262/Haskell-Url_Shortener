@@ -11,6 +11,7 @@ module Lib
     , UrlEntry(..)
     , UrlStore
     , generateShortCode
+    , isValidUrl
     ) where
 
 -- | This module (Lib.hs) contains the core logic for the URL shortener application.
@@ -26,6 +27,7 @@ import GHC.Generics (Generic) -- | Generic programming support.
 import Control.Concurrent.STM (TVar, atomically, readTVar, modifyTVar) -- | Software Transactional Memory for concurrent operations.
 import Data.Map (Map) -- | Maps for in-memory URL storage.
 import qualified Data.Map as Map -- | Maps for in-memory URL storage.
+import Network.URI (parseURI) -- | For parsing and validating URIs.
 
 
 -- SQLite Functionality
@@ -90,3 +92,11 @@ generateShortCode storeVar longUrl pass = atomically $ do
     let entry = UrlEntry longUrl pass
     modifyTVar storeVar (Map.insert shortCode entry)
     return shortCode
+
+
+-- Function to validate URLs
+-- Checks if a given string is a valid URL using parseURI
+isValidUrl :: String -> Bool
+isValidUrl url = case parseURI url of
+    Just _ -> True
+    Nothing -> False
