@@ -14,7 +14,6 @@ import Lib -- | Custom module containing core URL shortening logic and database 
 import Web.Scotty -- | Web framework for creating web applications.
 import qualified Data.Text.Lazy as T -- | Lazy Text for efficient text manipulation.
 import Data.Aeson -- | JSON encoding and decoding.
-import Network.Wai.Middleware.Cors (simpleCors) -- | Middleware for handling Cross-Origin Resource Sharing (CORS).
 import Network.URI (parseURI) -- | For parsing and validating URIs.
 import Database.SQLite.Simple -- | SQLite database interaction.
 import Data.Text.Lazy (Text, pack, unpack, null) -- | Lazy Text for efficient text manipulation.
@@ -153,8 +152,6 @@ main = do
     storeVar <- atomically $ newTVar Map.empty
     -- Start the Scotty web server on port 3000
     scotty 3000 $ do
-        -- Enable CORS middleware
-        middleware simpleCors
         -- Route for the main HTML page
         get "/" $ serveHTML conn
         -- Route for shortening URLs (SQLite database)

@@ -31,7 +31,6 @@ dependencies:
 - bytestring
 - base64-bytestring
 - http-types
-- wai-cors
 - network-uri
 - stm
 - containers

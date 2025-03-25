@@ -48,7 +48,6 @@ library
     , stm
     , text
     , time
-    , wai-cors
   default-language: Haskell2010
 
 executable url-shortner-exe
@@ -76,7 +75,6 @@ executable url-shortner-exe
     , text
     , time
     , url-shortner
-    , wai-cors
   default-language: Haskell2010
 
 test-suite url-shortner-test
@@ -105,5 +103,4 @@ test-suite url-shortner-test
     , text
     , time
     , url-shortner
-    , wai-cors
   default-language: Haskell2010
