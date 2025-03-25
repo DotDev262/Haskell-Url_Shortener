@@ -14,22 +14,11 @@ import Lib -- | Custom module containing core URL shortening logic and database 
 import Web.Scotty -- | Web framework for creating web applications.
 import qualified Data.Text.Lazy as T -- | Lazy Text for efficient text manipulation.
 import Data.Aeson -- | JSON encoding and decoding.
-import Network.URI (parseURI) -- | For parsing and validating URIs.
 import Database.SQLite.Simple -- | SQLite database interaction.
-import Data.Text.Lazy (Text, pack, unpack, null) -- | Lazy Text for efficient text manipulation.
-import Control.Concurrent.STM (atomically, newTVar, readTVar, modifyTVar, TVar) -- | Software Transactional Memory for concurrent operations.
+import Data.Text.Lazy (pack, unpack, null) -- | Lazy Text for efficient text manipulation.
+import Control.Concurrent.STM (atomically, newTVar, readTVar) -- | Software Transactional Memory for concurrent operations.
 import Control.Exception (SomeException) -- | Exception handling.
-import qualified Data.ByteString.Lazy.Char8 as B -- | Lazy ByteString for efficient byte string manipulation.
-import Data.Maybe (fromMaybe) -- | Functions for working with Maybe types.
-import Control.Applicative (optional) -- | Applicative functions.
 import qualified Data.Map as Map -- | Maps for in-memory URL storage.
-
--- Function to validate URLs
--- Checks if a given string is a valid URL using parseURI
-isValidUrl :: String -> Bool
-isValidUrl url = case parseURI url of
-    Just _ -> True
-    Nothing -> False
 
 -- Serve the HTML page that displays the shortened URLs and allows the user to shorten a new URL
 -- Fetches URL mappings from the SQLite database and renders an HTML page
