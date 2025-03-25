@@ -1,6 +1,6 @@
-name:                url-shortener
+name:                url-shortner
 version:             0.1.0.0
-github:              "dotdev262/url-shortener"
+github:              "githubuser/url-shortner"
 license:             BSD-3-Clause
 author:              "Author name here"
 maintainer:          "example@example.com"
