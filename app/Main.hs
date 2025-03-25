@@ -92,6 +92,8 @@ serveHTML conn = do
         ]
 
 
+
+-- Password Page used when shortening a link using password through the api
 passwordForm :: String -> String
 passwordForm code =
   "<html>" ++
